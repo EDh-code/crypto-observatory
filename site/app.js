@@ -1,3 +1,4 @@
+import {strengthIndex} from './strength.mjs';
 import {day,change,drawdown,periodReturn} from './math.mjs';
 const $=s=>document.querySelector(s),names={BTC:'Bitcoin',ETH:'Ethereum',SOL:'Solana',SUI:'Sui',XRP:'XRP Ledger'};
 let data,asset='BTC',view='usage',metric='addresses',windowDays=365;
@@ -20,6 +21,7 @@ function keys(){return view==='store'?[(asset==='BTC'?'dormant':'lth'),'realized
 function stale(s){return s?.points?.length&&Date.now()-day(s.points.at(-1)[0])>4*86400000}
 function failed(k){return data.failures.some(f=>f.asset===asset&&f.metric===k)}
 function render(){
+ overview();
  $('#assets').replaceChildren(...Object.entries(names).map(([symbol,name])=>{const b=document.createElement('button');b.className='asset'+(asset===symbol?' selected':'');b.setAttribute('aria-pressed',asset===symbol);b.innerHTML=`<span><strong>${symbol}</strong><small>${name}</small></span><span class="price">${fmt(data.assets[symbol]?.price?.points?.at(-1)?.[1],'usd')}</span>`;b.onclick=()=>{asset=symbol;metric=keys()[0];render()};return b}));
  document.querySelectorAll('[data-view]').forEach(b=>{b.classList.toggle('selected',b.dataset.view===view);b.setAttribute('aria-pressed',b.dataset.view===view)});
  const contexts={BTC:'Settlement activity is only one part of Bitcoin’s use. Holding wealth may create no transactions.',ETH:'These figures cover Ethereum mainnet. Layer 2 activity is not included; use growthepie for the wider ecosystem.',SOL:'Use fees and trading activity together. Raw Solana totals can include validator votes, so transaction totals are not shown as user activity.',SUI:'Look for persistent activity alongside funds in applications. Incentives and token prices can distort apparent growth.',XRP:'Transactions and adjusted transfers are broad network measures, not a verified breakdown of payment adoption or Ripple’s commercial activity.'};
@@ -41,3 +43,16 @@ function chart(){const s=series(metric),[label,type,description]=definitions[met
 }
 async function load(){const button=$('#refresh');button.disabled=true;try{const r=await fetch('./data/metrics.json',{cache:'no-store'});if(!r.ok)throw Error();data=await r.json();$('#updated').textContent='Collection run: '+new Date(data.updatedAt).toLocaleString();$('#notice').textContent=Date.now()-Date.parse(data.updatedAt)>3*86400000?'The collection run is over three days old. Check the GitHub Actions workflow.':'';render()}catch{$('#notice').textContent='Could not load observations. Serve this folder through GitHub Pages or a local HTTP server, then retry.'}finally{button.disabled=false}}
 $('#refresh').onclick=load;$('#period').onchange=e=>{windowDays=Number(e.target.value);chart()};document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{view=b.dataset.view;metric=keys()[0];render()});load();
+
+function overview(){
+ $('#overview').replaceChildren(...Object.entries(names).map(([symbol,name])=>{
+  const result=strengthIndex(data.assets[symbol]||{},data.through),pts=result.points,last=pts.at(-1),delta=change(pts,30),b=document.createElement('button');
+  const state=delta==null?'Insufficient data':delta>2?'Rising':delta< -2?'Falling':'Broadly flat';
+  b.className='overview-coin';
+  let svg='<div class="mini-empty">Insufficient current history</div>';
+  if(pts.length>1){const values=pts.map(p=>p[1]),min=Math.min(...values),max=Math.max(...values),span=max-min||1,start=day(pts[0][0]),finish=day(last[0]);let path='';pts.forEach(([d,v],i)=>{path+=(i===0||day(d)-day(pts[i-1][0])>86400000?'M':'L')+(8+344*(day(d)-start)/(finish-start))+','+(80-66*(v-min)/span)+' '});svg=`<svg viewBox="0 0 360 94" role="img" aria-label="${symbol} strength trend over the last year"><path d="${path}" fill="none" stroke="currentColor" stroke-width="2.5"/></svg>`}
+  b.innerHTML=`<div class="overview-top"><span><strong>${symbol}</strong><small>${name}</small></span><span class="trend ${delta>2?'up':delta< -2?'down':''}">${state}</span></div><div class="index-number">${last?last[1].toFixed(1):'—'}<span>Strength index</span></div><div class="${delta< -2?'down':'up'}">${svg}</div><div class="overview-foot"><span>30 days <strong>${delta==null?'—':(delta>=0?'+':'')+delta.toFixed(1)+'%'}</strong></span><span>Price ${fmt(data.assets[symbol]?.price?.points?.at(-1)?.[1],'usd')}</span></div><small>${result.used.length}/5 factors · ${last?'As of '+last[0]:'No complete series'}${Date.now()-day(data.through)>4*86400000?' · Stale':''}</small><small>Includes: ${result.used.map(k=>definitions[k][0]).join(', ')||'none'}</small><span class="inspect">View individual factors</span>`;
+  b.onclick=()=>{asset=symbol;metric=keys()[0];$('#detail').hidden=false;$('#overview').hidden=true;$('.method').hidden=true;render();$('#back').focus()};return b;
+ }));
+}
+$('#back').onclick=()=>{$('#detail').hidden=true;$('#overview').hidden=false;$('.method').hidden=false;$('#overview button').focus()};
